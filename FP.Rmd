@@ -1,0 +1,162 @@
+---
+title: 'Analysis on effect of age on personal income'
+author: "Hongrui Zhu"
+date: "09/12/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(haven)
+library(tidyverse)
+library(broom)
+library(arm)
+
+raw_data_survey <- read_dta("/Users/zhuhongrui/Desktop/usa_00008.dta")
+#add labels
+raw_data_survey <- labelled::to_factor(raw_data_survey)
+
+reduced_data_survey <- 
+  raw_data_survey %>% 
+  dplyr::select(sex,
+                age,
+                race,
+                educ,
+                inctot)
+#adjust data type
+reduced_data_survey$age<-as.numeric(reduced_data_survey$age)
+
+reduced_data_survey$highincome <-ifelse(reduced_data_survey$inctot >= 10000, 1, 0)
+
+goodedu <- c('1 year of college','2 years of college','3 years of college','4 years of college', '5+ years of college')
+
+reduced_data_survey$goodedu <-ifelse(reduced_data_survey$educ %in% goodedu , 1, 0)
+reduced_data_survey<-na.omit(reduced_data_survey)
+
+rm(raw_data_survey)
+
+
+#propensity score
+propensity_score <- glm(goodedu ~ sex+age+race+inctot, 
+                        family = binomial,
+                        data = reduced_data_survey)
+
+reduced_data_survey <- 
+  augment(propensity_score, 
+          data = reduced_data_survey,
+          type.predict = "response") %>% 
+  dplyr::select(-.resid, -.std.resid, -.hat, -.sigma, -.cooksd) 
+
+reduced_data_survey <- 
+  reduced_data_survey %>% 
+  arrange(.fitted, goodedu)
+
+reduced_data_survey$treated <- 
+  if_else(reduced_data_survey$goodedu == 0, 0, 1)
+
+
+matches <- arm::matching(z = reduced_data_survey$treated , 
+                         score = reduced_data_survey$.fitted)
+
+reduced_data_survey <- cbind(reduced_data_survey, matches)
+
+reduced_data_survey_matched <- 
+  reduced_data_survey %>% 
+  filter(match.ind != 0) %>% 
+  dplyr::select(-match.ind, -pairs, -treated)
+
+head(reduced_data_survey_matched)
+
+
+propensity_score_regression <- glm(highincome ~ age+race+sex+goodedu, 
+     family = binomial,
+     data = reduced_data_survey_matched)
+
+huxtable::huxreg(propensity_score_regression)
+
+
+```
+##Abstract##
+This project starts with a very basic problem: does education affect income? In this project, I would find out the answer by trying propensity score matching and causal inference. At the end of the project, the result would be analyzed, I would find whether education affects income, and give some suggestions to people who are wondering about this question.analyzed
+
+##Keywords##
+Propensity score, causual inferece, question-driven, education, income 
+
+##Introduction##
+
+For a long time, many people claimed on social media that education does not affect people’s income, people can earn a lot of money even if they did not have a high-level education. I do not agree with this statement but I do not have any evidence against it. Therefore, in this project, the analysis will be finding out would education affects average personal income, if it does, how would education affect it? 
+
+To start the project, one question comes into my mind: would education affect people's income, if it does, how would it affect it? Therefore, the project would be question-driven, and all the analysis would be started from and based on this question. One popular way to approach the answer would be propensity score matching, by conducting this method, would tell you whether having a better education can result in a higher income. The dataset that is chosen is 2019 America census data, providing information of millions of Americans, such as their gender, age, the education they took, and the most important thing, their income every year.
+
+In this project, I will describe the dataset chose in the methodology section, the method used also in the methodology section, and the result we have at the end of the analysis in the result section. In the conclusion section, I will find out the inference of the data. Propensity score matching would be the main method that is used for analysis, at the end of this project, it would give some information about how different variables can affect people's income every year, also giving us a suggestion about how education can affect income level.
+
+##Methodology##
+
+##Data
+
+```{r}
+table(reduced_data_survey$highincome, reduced_data_survey$educ)
+
+```
+The dataset chose is a real dataset from IPUMS (https://usa.ipums.org/) and the data is a census of American in 2019, the variables selected in this dataset are sex, age, education, income, and race. For the sex variable, it indicates observations' gender, and in this dataset, there are only male and female, there is no "other" option so there is no change to this variable. Similarly, for variable age, which indicates how old people are, remained unchanged. And for the variable race, which indicates what race people are, is a categorical variable, also remained unchanged. For the education variable, it indicates the education people had, for people who did not go to college, it indicates the grade they finished, for example, "grade 9", and for people who took higher education, it would indicate years of college, such as "two years of college". Since in this project, the question we start from is whether education affects income, the data for education were divided, for people who took college, they are sorted into "highedu" variable, in this way, the following propensity score matching can be done. The last variable, income, shows how much money people make every year, I also divided it into two parts, "highincome" for those who make more than $10000 a year, and the rest are not. The table shows the two most important variables we are investigating, income and education.
+
+
+##model
+
+$$Y = \beta_0+\beta_1*age+\beta_2*race_1+\beta_3*race_2 +\beta_4*race_3+\beta_5*race_4+\beta_6*race_5+\beta_7*race_6+\beta_8*race_7+\beta_9*race_8+\beta_10*sex+\beta_11*edu$$
+$$Y = \beta_0+\beta_1*age+\beta_2*race_1+\beta_3*race_2 +\beta_4*race_3+\beta_5*race_4+\beta_6*race_5+\beta_7*race_6+\beta_8*race_7+\beta_9*race_8+\beta_10*sex+\beta_11*edu$$
+
+The above is a formula for propensity score regression. After conducting propensity score matching, the formula is produced. The $$\beta_1$$ is the coefficient of age, giving suggestions about how age can affect whether they have a high income. For $$\beta_2$$ to $$\beta_9$$ they are the coefficient related to different races that observations belong, those race are all dummy variables, for example, if the observation is a Japanese, $$race_4$$ would be 1 and all other races variables would be 0, which means only $$\beta_5$$ would be considered for this observation. For $$\beta_10$$, it is the coefficient for female, also a dummy variable, which means that when the observation is a female, it is 1 and $$\beta_10$$ is included, but if the observation is male, it is zero, which means we can ignore the $$\beta_10$$. Similarly, the last coefficient is also a dummy variable, $$\beta_11$$, which is related to good education, if the person took "good education", as we discussed before, attended to college, the variable would be 1, and $$\beta_11$$ would be included.
+
+For those coefficients, they would give us a suggestion about how the variable can affect income. For example, $$\beta_1$$ equals 0.021 which suggests if other variables remain still, for every one-year-old that person grows, the probability of having high income would increase by 0.021. By analyzing these coefficients, it would tell us how much this variable can affect, and this will be discussed in the following section.
+
+##Results##
+
+Initially, the dataset has 65095 observations and after finishing propensity score matching, 56956 observations are left, which means that we only made 28478 pairs of matching, and 8139 observations failed to have a match. And the following regression was done based on a new reduced dataset.
+
+```{r}
+summary(propensity_score_regression)
+```
+From the summary above, it shows that most variables have a significant influence on income, including a good education. The variables age, sex, good education, and races except "Asian or Pacific Islander" and "Japanese" all have p-values less than 0.05, which means that we have evidence that these variables influence personal income. 
+
+For variable age, the coefficient of it is 0.021 with a significance, suggesting us that with every one year old the person grows, the possibility of having high income would increase for 0.021. For the Sexfemale variable, -0.415 shows that being a female result in a lower personal income, in another word, males tend to make more money compare to females who have a similar situation. And for race variables, only "Asian or Pacific Islander" has a positive coefficient, suggesting that Asian or Pacific islanders tend to make more money than others. However, the corresponding P-value is 0.45, which is too large to be evidence to support our hypothesis. Finally, the good education variable, got a 0.815 coefficient with a p-value less than 0.05, suggesting that having a better education normally results in a higher personal income, with evidence to support our hypothesis. Here is the answer to our question at the very beginning, better education does make the personal income higher.
+
+##Discussion##
+
+##summary
+Basically what this project has done is getting a suitable dataset, and find out a question to start with. In this project, my question is whether education can affect people's income. To approach the answer, the first thing done was cleaning the data, I changed those categorical variables into dummy variables, in this way, the analysis can be easier. Then by doing propensity score matching, we get the propensity score regression, and this regression gives us the answer we were looking for.
+
+##conclusion
+The propensity score regression suggests that people who had better education(college) have a 0.815 increased probability to have higher income compared to people who are not. Here comes the answer to the question we have at the beginning. Other than this, we found that age and sex both have an influence on personal income, being a young female can potentially bring some disadvantages to making money. However, in this regression, we do not have enough evidence to support that race is also impacting personal income. 
+
+Everyone on this earth thinks about how to make more money, from this project, seems having a better education can be helpful. Hopefully, this idea can make people realize how important that study is, learning more knowledge can help people have better lives. On the other hand, learning is always how humans got improved for thousands of years. More people realize how important study is can make the society improved faster.  
+
+##weakness & next step
+There are a lot of weaknesses in this project. The first weakness is the dataset. The original dataset contains over 660 thousand observations, I randomly sampled the dataset and only 60000 observations were left. Despite I used random sampling, this step can still potentially bring bias. Reducing the size of the dataset is because I do not have a powerful computer to compute all 660 thousand observations, the reduced dataset still took me a very long time to run the code. If I want to improve this situation, a better computer is needed. 
+
+The second weakness is the method I used, propensity score matching was the major method I used, and it got me the answer that I was looking for, but it is possible if I try out other methods, such as the difference in difference or logistic regression, I might find different answers. Due to the time limit, I was not able to do that, so the next step is to try another method so my results can be more varied.
+
+
+
+
+
+
+
+
+
+
+
+## Reference 
+1. Hadley Wickham and Evan Miller (2020). haven: Import and Export 'SPSS', 'Stata' and
+  'SAS' Files. R package version 2.3.1. https://CRAN.R-project.org/package=haven
+  
+2. Wickham et al., (2019). Welcome to the tidyverse. Journal of Open Source Software,
+  4(43), 1686, https://doi.org/10.21105/joss.01686
+  
+3. David Robinson, Alex Hayes and Simon Couch (2020). broom: Convert Statistical Objects
+  into Tidy Tibbles. R package version 0.7.2. https://CRAN.R-project.org/package=broom
+  
+4. Andrew Gelman and Yu-Sung Su (2020). arm: Data Analysis Using Regression and
+  Multilevel/Hierarchical Models. R package version 1.11-2.
+  https://CRAN.R-project.org/package=arm
+  
+5. IPUMS USA (2020). https://usa.ipums.org/usa/index.shtml
